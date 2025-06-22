@@ -23,7 +23,8 @@ jobs:
           gcc-aarch64-linux-gnu \
           g++-aarch64-linux-gnu \
           make \
-          git
+          git \
+          file  # 用于文件类型检查
         
     - name: Clone fping repository
       run: |
@@ -52,18 +53,21 @@ jobs:
         cd fping
         make -j$(nproc)
         
-    - name: Verify binary
+    - name: Verify binary architecture
       run: |
         cd fping
-        # 检查文件架构
-        file src/fping | grep "ARM aarch64"
-        # 检查版本
-        ./src/fping -v
+        # 使用 file 命令检查架构
+        file src/fping
+        # 确认输出中包含 "ARM aarch64"
+        file src/fping | grep "ARM aarch64" || (echo "错误: 二进制文件不是 ARM aarch64 架构"; exit 1)
         
     - name: Create package
       run: |
         mkdir -p fping-arm64/usr/bin
         cp fping/src/fping fping-arm64/usr/bin/
+        
+        # 使用 readelf 获取版本信息
+        aarch64-linux-gnu-readelf -p .comment fping/src/fping > version_info.txt
         
         # 创建安装脚本
         cat > fping-arm64/install.sh << 'EOF'
@@ -86,11 +90,15 @@ jobs:
         echo "安装 fping 到 /usr/local/bin"
         sudo install -m 0755 usr/bin/fping /usr/local/bin/fping
         
+        # 设置权限
+        echo "设置网络权限"
+        sudo setcap cap_net_raw+ep /usr/local/bin/fping
+        
         echo ""
         echo "=============================================="
         echo "fping 安装成功!"
         echo "版本信息:"
-        /usr/local/bin/fping -v
+        /usr/local/bin/fping -v 2>&1 || echo "无法获取版本，请在 ARM64 设备上运行"
         echo ""
         echo "使用示例:"
         echo "  fping google.com github.com"
@@ -100,7 +108,10 @@ jobs:
         chmod +x fping-arm64/install.sh
         
         # 添加版本信息
-        fping-arm64/usr/bin/fping -v > fping-arm64/VERSION
+        echo "fping ARM64 构建" > fping-arm64/README
+        echo "构建日期: $(date)" >> fping-arm64/README
+        echo "来源: https://github.com/schweikert/fping" >> fping-arm64/README
+        cat version_info.txt >> fping-arm64/README
         
         # 打包
         tar czf fping-arm64.tar.gz -C fping-arm64 .
