@@ -1,0 +1,121 @@
+name: Build fping for ARM64 (GLIBC 2.28 compatible)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # 使用 Ubuntu 18.04（glibc 2.27）确保兼容性
+    runs-on: ubuntu-18.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          autoconf \
+          automake \
+          libtool \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          make \
+          git \
+          file
+        
+    - name: Clone fping repository
+      run: |
+        git clone https://github.com/schweikert/fping.git
+        cd fping
+        git checkout 5.0  # 使用与 glibc 2.28 兼容的旧版本
+        
+    - name: Generate build system
+      run: |
+        cd fping
+        ./autogen.sh
+        
+    - name: Configure for ARM64 with compatible settings
+      run: |
+        cd fping
+        ./configure \
+          --host=aarch64-linux-gnu \
+          --prefix=/usr \
+          --enable-ipv4 \
+          --enable-ipv6 \
+          --with-systemd=no \
+          CFLAGS="-O2 -pipe -fPIC" \
+          LDFLAGS="-Wl,-z,relro,-z,now"
+        
+    - name: Build fping
+      run: |
+        cd fping
+        make -j$(nproc)
+        
+    - name: Verify binary compatibility
+      run: |
+        cd fping
+        # 检查最大 glibc 版本需求
+        aarch64-linux-gnu-objdump -T src/fping | grep GLIBC | sort -u
+        
+        # 确认没有超过 2.28 的版本需求
+        aarch64-linux-gnu-objdump -T src/fping | grep GLIBC | awk '{print $5}' | sort -V | tail -1 | grep -v 'GLIBC_2.2[89]' && exit 1 || exit 0
+        
+    - name: Create package
+      run: |
+        mkdir -p fping-arm64/usr/bin
+        cp fping/src/fping fping-arm64/usr/bin/
+        
+        # 创建安装脚本
+        cat > fping-arm64/install.sh << 'EOF'
+        #!/bin/bash
+        # fping ARM64 安装脚本（兼容 glibc 2.28）
+        set -e
+        
+        # 检查架构
+        if [ "$(uname -m)" != "aarch64" ]; then
+          echo "警告: 此二进制是为 ARM64 架构编译的"
+          echo "当前架构: $(uname -m)"
+          read -p "是否继续安装? (y/N) " -n 1 -r
+          echo
+          if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+          fi
+        fi
+        
+        # 安装 fping
+        echo "安装 fping 到 /usr/local/bin"
+        sudo install -m 0755 usr/bin/fping /usr/local/bin/fping
+        
+        # 设置权限
+        echo "设置网络权限"
+        sudo setcap cap_net_raw+ep /usr/local/bin/fping 2>/dev/null || \
+          echo "注意: 需要安装 libcap2-bin 来设置网络权限: sudo apt install libcap2-bin"
+        
+        echo ""
+        echo "=============================================="
+        echo "fping 安装成功!"
+        echo "版本信息:"
+        /usr/local/bin/fping -v
+        echo ""
+        echo "使用示例:"
+        echo "  fping 10.229.72.33"
+        echo "  fping google.com github.com"
+        echo "=============================================="
+        EOF
+        
+        chmod +x fping-arm64/install.sh
+        
+        # 添加版本信息
+        fping/src/fping -v > fping-arm64/VERSION
+        
+        # 打包
+        tar czf fping-arm64.tar.gz -C fping-arm64 .
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fping-arm64-glibc228
+        path: fping-arm64.tar.gz
+        retention-days: 7
