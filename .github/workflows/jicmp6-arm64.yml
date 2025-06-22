@@ -27,8 +27,8 @@ jobs:
     - name: Checkout code with submodules
       uses: actions/checkout@v4
       with:
-        repository: 'OpenNMS/jicmp'
-        ref: 'jira/JICMP-23'  # 指定分支
+        repository: 'OpenNMS/jicmp6'
+        #ref: 'jira/JICMP-23'  # 指定分支
         submodules: 'recursive'
         path: 'jicmp-source'
         
@@ -137,18 +137,18 @@ jobs:
         cd jicmp-source
         
         # 查找库文件
-        LIB_PATH=$(find . -name libjicmp.so -print -quit)
+        LIB_PATH=$(find . -name libjicmp6.so -print -quit)
         
         if [ -z "$LIB_PATH" ]; then
-          echo "错误: 未找到 libjicmp.so"
+          echo "错误: 未找到 libjicmp6.so"
           find . -name "*.so*"
           exit 1
         fi
         
         # 创建输出目录
         mkdir -p output
-        cp $LIB_PATH output/libjicmp.so
-        cp jicmp.jar output/
+        cp $LIB_PATH output/libjicmp6.so
+        cp jicmp6.jar output/
         
         # 创建安装脚本
         cat > output/install.sh << 'EOF'
@@ -158,16 +158,16 @@ jobs:
         LIB_DIR="/usr/lib"
         JAVA_DIR="/usr/share/java"
         
-        if [ ! -f "libjicmp.so" ]; then
-          echo "错误: 缺少 libjicmp.so"
+        if [ ! -f "libjicmp6.so" ]; then
+          echo "错误: 缺少 libjicmp6.so"
           exit 1
         fi
         
-        echo "安装 libjicmp.so 到 $LIB_DIR"
-        sudo install -m 0755 libjicmp.so $LIB_DIR/
+        echo "安装 libjicmp6.so 到 $LIB_DIR"
+        sudo install -m 0755 libjicmp6.so $LIB_DIR/
         
-        echo "安装 jicmp.jar 到 $JAVA_DIR"
-        sudo install -m 0644 jicmp.jar $JAVA_DIR/
+        echo "安装 jicmp6.jar 到 $JAVA_DIR"
+        sudo install -m 0644 jicmp6.jar $JAVA_DIR/
         
         echo "更新动态链接库缓存"
         sudo ldconfig
@@ -178,11 +178,11 @@ jobs:
         chmod +x output/install.sh
         ls -alht .
         # 打包
-        tar czf ../jicmp-kylin-arm.tar.gz -C output .
+        tar czf ../jicmp6-kylin-arm.tar.gz -C output .
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: jicmp-kylin-arm
-        path: jicmp-kylin-arm.tar.gz
+        name: jicmp6-kylin-arm
+        path: jicmp6-kylin-arm.tar.gz
         retention-days: 7
