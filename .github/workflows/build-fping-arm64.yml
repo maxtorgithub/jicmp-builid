@@ -1,46 +1,113 @@
 name: Build fping for ARM64
 
 on:
+  workflow_dispatch:  # 手动触发
   push:
-    branches: [ "main" ]
-  workflow_dispatch:
+    tags:             # 打标签时触发
+      - 'v*'          # 匹配所有 v 开头的标签
 
 jobs:
   build:
-    runs-on: ubuntu-linux-22.04
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
       
-      # 使用原生 ARM 环境（比交叉编译更可靠）
-      - name: Setup ARM64 environment
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Build using Docker
-        run: |
-          docker run --rm --platform linux/arm64 \
-            -v $(pwd):/build -w /build \
-            arm64v8/ubuntu:22.04 \
-            bash -c "
-            apt-get update && \
-            apt-get install -y git autoconf automake libtool && \
-            git clone https://github.com/schweikert/fping.git && \
-            cd fping && \
-            ./autogen.sh && \
-            ./configure && \
-            make -j$(nproc) && \
-            cp fping /build/
-            "
-
-      - name: Verify binary
-        run: |
-          file fping | grep "ARM aarch64" || (echo "❌ 错误的架构类型" && file fping && exit 1)
-          chmod +x fping
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fping-arm64
-          path: fping
-          retention-days: 5
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          autoconf \
+          automake \
+          libtool \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          make \
+          git
+        
+    - name: Clone fping repository
+      run: |
+        git clone https://github.com/schweikert/fping.git
+        cd fping
+        # 使用稳定版本（可选）
+        # git checkout 5.1
+        
+    - name: Generate build system
+      run: |
+        cd fping
+        ./autogen.sh
+        
+    - name: Configure for ARM64
+      run: |
+        cd fping
+        ./configure \
+          --host=aarch64-linux-gnu \
+          --prefix=/usr \
+          --enable-ipv4 \
+          --enable-ipv6 \
+          --with-systemd=no
+        
+    - name: Build fping
+      run: |
+        cd fping
+        make -j$(nproc)
+        
+    - name: Verify binary
+      run: |
+        cd fping
+        # 检查文件架构
+        file src/fping | grep "ARM aarch64"
+        # 检查版本
+        ./src/fping -v
+        
+    - name: Create package
+      run: |
+        mkdir -p fping-arm64/usr/bin
+        cp fping/src/fping fping-arm64/usr/bin/
+        
+        # 创建安装脚本
+        cat > fping-arm64/install.sh << 'EOF'
+        #!/bin/bash
+        # fping ARM64 安装脚本
+        set -e
+        
+        # 检查架构
+        if [ "$(uname -m)" != "aarch64" ]; then
+          echo "警告: 此二进制是为 ARM64 架构编译的"
+          echo "当前架构: $(uname -m)"
+          read -p "是否继续安装? (y/N) " -n 1 -r
+          echo
+          if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+          fi
+        fi
+        
+        # 安装 fping
+        echo "安装 fping 到 /usr/local/bin"
+        sudo install -m 0755 usr/bin/fping /usr/local/bin/fping
+        
+        echo ""
+        echo "=============================================="
+        echo "fping 安装成功!"
+        echo "版本信息:"
+        /usr/local/bin/fping -v
+        echo ""
+        echo "使用示例:"
+        echo "  fping google.com github.com"
+        echo "=============================================="
+        EOF
+        
+        chmod +x fping-arm64/install.sh
+        
+        # 添加版本信息
+        fping-arm64/usr/bin/fping -v > fping-arm64/VERSION
+        
+        # 打包
+        tar czf fping-arm64.tar.gz -C fping-arm64 .
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fping-arm64
+        path: fping-arm64.tar.gz
+        retention-days: 7
